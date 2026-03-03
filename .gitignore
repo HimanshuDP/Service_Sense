@@ -1,0 +1,32 @@
+# ── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+venv/
+.venv/
+env/
+.env/
+
+# ── Secrets — NEVER commit these ────────────────────────────────────────────
+backend/.env
+backend/*.json
+
+# ── Node / Next.js ───────────────────────────────────────────────────────────
+node_modules/
+.next/
+frontend/.next/
+frontend/node_modules/
+*.log
+
+# ── ML model (large binary — regenerate with ml/train.py) ───────────────────
+backend/ml/model.joblib
+
+# ── OS / Editor ─────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

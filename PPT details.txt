@@ -1,0 +1,68 @@
+# Yukti Innovation Challenge - Project Presentation Details
+# Project Name: ServiceSense Platform (Environmental Focus)
+
+---
+
+## 1. Problem Statement
+Many environmental issues at the local level (like illegal dumping, sudden water contamination, or hazardous air quality spikes) go unnoticed by central authorities until they escalate into major crises. Furthermore, citizens lack a centralized, engaging, and verified platform to cross-reference news with real-time ground reports. Current solutions are either purely news-driven (lacking local context and actionability) or purely complaint-driven (lacking verification, often plagued by spam).
+
+There is a critical need for a platform that bridges the gap between global environmental news and verified, hyper-Local community action.
+
+---
+
+## 2. The Idea / Solution
+**ServiceSense** is an AI-powered environmental intelligence platform. It acts as a dual-engine system:
+1.  **News Aggregation & Intelligence:** It continuously monitors global news (via NewsAPI), instantly categorizing articles using a custom-trained Machine Learning model (Air, Water, Land, Waste, General), and using Generative AI (Llama-3 via Groq) to deduce the "Locality" and generate actionable "Next Steps" for citizens.
+2.  **Community Action Hub:** It offers a social-media-style dashboard where citizens can report local environmental issues. These reports are immediately fact-checked and verified by AI to prevent spam, assigning them a "Credibility Score" based on AI confidence and community engagement (likes/comments).
+
+The result is a dynamic ecosystem where users can seamlessly transition from reading about a city-wide air pollution crisis to reporting a localized waste-burning incident in their exact neighborhood.
+
+---
+
+## 3. Tech Stack
+
+### Frontend (Client-Side)
+*   **Framework:** Next.js 14 (React)
+*   **Styling:** Tailwind CSS (for modern, responsive, and glassmorphism UI)
+*   **Authentication:** Firebase Auth (Google Sign-In & Email/Password)
+*   **Data Fetching:** Axios / native fetch API
+
+### Backend (Server-Side)
+*   **Framework:** FastAPI (Python - for high-performance async API endpoints)
+*   **Database:** MongoDB (using Motor async driver) + Firebase Realtime Database (for synced demo data)
+*   **Machine Learning (NLP):** Scikit-learn (TF-IDF Vectorizer + Logistic Regression model trained on a custom dataset)
+*   **Generative AI:** Groq API running Llama-3.3-70b (for ultra-fast summarization and verification)
+*   **External APIs:** NewsAPI (for fetching live news articles), Cloudinary (for free, unsigned storage of community images and videos)
+
+---
+
+## 4. System Architecture
+
+The architecture follows a modern decoupled client-server model:
+
+*   **Client Layer (Next.js):** Communicates heavily with the FastAPI backend. It manages state, Firebase user sessions, and dynamically switches UI themes (e.g., Blue for Water, Green for Land) based on the active dashboard route.
+*   **API Gateway (FastAPI):** Exposes RESTful endpoints (`/api/news`, `/api/community`, `/api/analytics`). It acts as the orchestrator.
+*   **ML Pipeline (Local Inference):** When new text arrives (either a fetched news article or a user community post), FastAPI loads the `.joblib` Scikit-Learn models into memory and runs a rapid classification inference to assign it an environmental category.
+*   **LLM Pipeline (Cloud Inference):** FastAPI sends the text to the Groq API. For news, it requests a 2-sentence summary and 3 action steps. For community posts, it asks the LLM to verify if the post is a legitimate environmental concern or spam.
+*   **Data Persistence Layer:** Verified data is stored in the NoSQL database. Cloudinary directly handles large media uploads from the frontend, returning secure URLs that are then saved to the database.
+
+---
+
+## 5. Key Features & Implementation Highlights
+
+*   **Custom Machine Learning Classifier:** We did not just rely on external APIs; we built and trained our own NLP model using Scikit-Learn. It was trained on hundreds of seed examples to accurately distinguish between "Waste Management" and "Air Pollution" text.
+*   **Intelligent Locality Filtering:** The Generative AI extracts the specific city/locality from raw news text. The frontend then uses a global sticky Navbar to filter the entire application state (News, Posts, Heatmaps) by that specific locality.
+*   **Anti-Spam Community Reports:** Every community post goes through a strict AI gatekeeper. It returns `valid`, `needs_review`, or `invalid`. Only valid or review-pending posts are shown to the public. 
+*   **Dynamic Theming & Glassmorphism:** The UI changes its gradient backgrounds, accent colors, and icons dynamically depending on whether the user is viewing the "Water", "Air", "Land", or "Waste" dashboard.
+*   **Interactive Analytics:** Features a Heatmap (rendered via Leaflet.js) showing hot-spots of community reports, and Monthly Trend Charts (rendered via Recharts) showing the rise and fall of specific environmental issues over time.
+*   **Offline / Demo Resilience:** The frontend is heavily engineered with `try/catch` fallbacks. If the FastAPI backend goes offline, or API keys expire, the platform seamlessly degrades to a "Mock Data" mode, ensuring the UI and presentation never break during a live demo.
+
+---
+
+## 6. Business Value & Future Scope (TRL-5 and beyond)
+*   **Current State (TRL-4):** A fully functional software prototype validated in a laboratory/simulated environment.
+*   **Target Audience:** Environmentally conscious citizens, local municipal bodies (for tracking the heatmap of issues), and NGOs.
+*   **Future Expansions:** 
+    *   Integration with IoT air/water quality sensors for hardware-backed ground truth data.
+    *   Gamification: Rewarding users with "Eco-Tokens" for highly credible, validated community reports.
+    *   Direct automated ticket lodging with local municipal APIs (e.g., the BMC or local Nagar Nigam).
