@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/news", tags=["news"])
 
 # Primary filter: ENV_KEYWORDS in news_service.py rejects non-environmental articles before ML.
 # Secondary filter: ML confidence must be >= 0.20 (confirmation pass only).
-MIN_CONFIDENCE = 0.07
+MIN_CONFIDENCE = 0.3
 
 
 @router.get("")

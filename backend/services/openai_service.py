@@ -28,7 +28,7 @@ async def summarize_and_suggest(title: str, description: str, category: str) -> 
         f"Details: {description}\n\n"
         "Respond in JSON with two keys:\n"
         "1. 'summary': 2-sentence plain English summary\n"
-        "2. 'actions': list of exactly 3 short practical actions a citizen can take\n"
+        "2. 'actions': list of exactly 3 short, practical environment-saving actions a citizen can take to help combat this specific issue\n"
         "Keep responses concise. JSON only, no markdown."
     )
 

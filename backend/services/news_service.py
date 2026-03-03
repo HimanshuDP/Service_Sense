@@ -22,53 +22,130 @@ ENV_KEYWORDS = {
 
 def _is_environmental(title: str, description: str) -> bool:
     """Check if an article is environmental using keyword matching."""
-    text = (title + " " + (description or "")).lower()
+    t = title if title else ""
+    d = description if description else ""
+    text = (t + " " + d).lower()
+    
+    # DEBUG
+    print(f"DEBUG: EVALUATING TEXT ({len(text)} chars): {text[:60]}")
+    
     return any(kw in text for kw in ENV_KEYWORDS)
 
 
+GNEWS_API_BASE = "https://gnews.io/api/v4/search"
+
 async def fetch_news(locality: str = "", category: str = "") -> list[dict]:
-    """Fetch environment news from NewsAPI with strict environmental pre-filtering."""
-    if not settings.news_api_key or settings.news_api_key == "your_newsapi_key_here":
+    """Fetch environment news from both NewsAPI and GNews with strict environmental pre-filtering."""
+    
+    # Wait for either API key to be available. If both are unset, return mock data.
+    has_newsapi = settings.news_api_key and settings.news_api_key != "your_newsapi_key_here"
+    has_gnews = hasattr(settings, 'gnews_api_key') and settings.gnews_api_key and settings.gnews_api_key != "your_gnews_key_here"
+
+    if not has_newsapi and not has_gnews:
         return _mock_news(locality, category)
 
     # Build a focused query using specific environmental terms
     cat_map = {
-        "air": "air pollution OR smog OR AQI OR particulate matter",
-        "water": "water pollution OR river contamination OR groundwater",
-        "land": "deforestation OR wildfire OR forest loss OR soil erosion",
-        "waste": "plastic waste OR landfill OR recycling OR e-waste",
-        "general": "climate change OR biodiversity OR carbon emissions OR ecosystem",
+        "air": "air AND (pollution OR smog OR AQI)",
+        "water": "water AND (pollution OR contamination OR groundwater)",
+        "land": "(deforestation OR wildfire OR soil AND erosion)",
+        "waste": "(plastic AND waste OR landfill OR recycling OR e-waste)",
+        "general": "(climate AND change OR biodiversity OR carbon AND emissions OR ecosystem)",
     }
-    base_query = cat_map.get(category, "pollution OR deforestation OR climate change OR plastic waste OR air quality")
+    base_query = cat_map.get(category, "environment AND (pollution OR climate OR conservation)")
+    query = f"({base_query}) AND {locality}" if locality else base_query
 
-    if locality:
-        query = f"({base_query}) AND {locality}"
-    else:
-        query = base_query
-
+    articles = []
+    
     async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.get(
-            NEWS_API_BASE,
-            params={
-                "q": query,
-                "language": "en",
-                "sortBy": "publishedAt",
-                "pageSize": 30,
-                "apiKey": settings.news_api_key,
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        articles = data.get("articles", [])
+        tasks = []
+        
+        # 1. NewsAPI Request
+        if has_newsapi:
+            tasks.append(client.get(
+                NEWS_API_BASE,
+                params={
+                    "q": query,
+                    "language": "en",
+                    "sortBy": "publishedAt",
+                    "pageSize": 30,
+                    "apiKey": settings.news_api_key,
+                },
+            ))
+            
+        # 2. GNews Request
+        if has_gnews:
+            # GNews v4 uses 'q' for query. The 'OR' operator works. 
+            # We'll use our base environmental query so we get relevant news.
+            gnews_query = base_query.replace(" OR ", " ") + (" " + locality if locality else "")
+            
+            tasks.append(client.get(
+                GNEWS_API_BASE,
+                params={
+                    "q": f"\"{category}\"" if category and category != 'general' else "environment pollution climate",
+                    "lang": "en",
+                    "max": 30,  # GNews v4 uses 'max' for limit
+                    "apikey": settings.gnews_api_key,
+                }
+            ))
+            
+        # Execute both concurrently
+        import asyncio
+        responses = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        for idx, resp in enumerate(responses):
+            if isinstance(resp, Exception):
+                print(f"Error fetching from API {idx}: {resp}")
+                continue
+                
+            if resp.status_code == 200:
+                data = resp.json()
+                api_articles = data.get("articles", [])
+                print(f"DEBUG: API {idx} fetched {len(api_articles)} articles.")
+                
+                # Normalize GNews 'image' to NewsAPI 'urlToImage' format so frontend works seamlessly
+                for a in api_articles:
+                    if 'image' in a and 'urlToImage' not in a:
+                        a['urlToImage'] = a['image']
+                        
+                articles.extend(api_articles)
+            else:
+                print(f"DEBUG: API {idx} returned status {resp.status_code}: {resp.text}")
+
+    # Deduplicate by URL to avoid showing the exact same article twice
+    seen_urls = set()
+    unique_articles = []
+    
+    print(f"DEBUG: Beginning deduplication for {len(articles)} total articles")
+    for a in articles:
+        url = a.get("url")
+        if not url:
+            url = a.get("link", "no-url")
+            a["url"] = url
+            
+        if url not in seen_urls:
+            seen_urls.add(url)
+            unique_articles.append(a)
+
+    print(f"DEBUG: Articles after URL deduplication: {len(unique_articles)}")
 
     # Pre-filter: only return articles that contain at least one environmental keyword
-    filtered = [
-        a for a in articles
-        if _is_environmental(a.get("title", "") or "", a.get("description", "") or "")
-    ]
+    filtered = []
+    for a in unique_articles:
+        title = a.get("title", "") or ""
+        desc = a.get("description", "") or ""
+        
+        # DEBUG
+        print(f"DEBUG Filter check - Title: {title[:30]}... Desc: {desc[:30]}...")
+        
+        if _is_environmental(title, desc):
+            filtered.append(a)
+            
+    print(f"DEBUG: Articles surviving _is_environmental filter: {len(filtered)}")
+    
+    # Check if they randomly vanished?
+    print(f"DEBUG: Returning {len(filtered)} articles out of fetch_news.")
     return filtered
-
-
 
 def _mock_news(locality: str = "", category: str = "") -> list[dict]:
     """Return realistic mock news when API key is not set.

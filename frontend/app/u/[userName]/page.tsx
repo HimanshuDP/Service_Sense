@@ -6,6 +6,7 @@ import { useAuth } from '@/lib/AuthContext';
 import { authApi, communityApi } from '@/lib/api';
 import { User, CommunityPost } from '@/lib/types';
 import CommunityPostCard from '@/components/CommunityPostCard';
+import InstagramPostModal from '@/components/InstagramPostModal';
 
 export default function PublicProfilePage() {
     const params = useParams();
@@ -16,6 +17,7 @@ export default function PublicProfilePage() {
     const [posts, setPosts] = useState<CommunityPost[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [selectedPost, setSelectedPost] = useState<CommunityPost | null>(null);
     const [isFollowing, setIsFollowing] = useState(false);
     const [followLoading, setFollowLoading] = useState(false);
 
@@ -138,8 +140,8 @@ export default function PublicProfilePage() {
                                         onClick={handleFollowToggle}
                                         disabled={followLoading}
                                         className={`px-6 py-2 rounded-lg font-medium text-sm transition-colors border ${isFollowing
-                                                ? 'border-white/20 bg-transparent hover:bg-white/10 text-white'
-                                                : 'border-transparent bg-blue-600 hover:bg-blue-500 text-white'
+                                            ? 'border-white/20 bg-transparent hover:bg-white/10 text-white'
+                                            : 'border-transparent bg-blue-600 hover:bg-blue-500 text-white'
                                             }`}
                                     >
                                         {followLoading ? '...' : isFollowing ? 'Following' : 'Follow'}
@@ -177,10 +179,47 @@ export default function PublicProfilePage() {
                 <div>
                     <h2 className="text-lg font-bold text-white mb-6 border-b border-white/10 pb-4">Community Posts</h2>
                     {posts.length > 0 ? (
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            {posts.map(post => (
-                                <CommunityPostCard key={post.id} post={post} />
-                            ))}
+                        <div className="grid grid-cols-3 gap-1 md:gap-4">
+                            {posts.map(post => {
+                                const hasMedia = post.mediaUrls && post.mediaUrls.length > 0;
+                                const firstMedia = hasMedia ? post.mediaUrls![0] : ((post as any).imageUrl || null);
+                                const isVideo = firstMedia && (firstMedia.includes('.mp4') || firstMedia.includes('video'));
+
+                                return (
+                                    <div
+                                        key={post.id}
+                                        onClick={() => setSelectedPost(post)}
+                                        className="relative aspect-square bg-slate-800 cursor-pointer group overflow-hidden md:rounded-xl"
+                                    >
+                                        {/* Thumbnail Image/Video or Placeholder */}
+                                        {firstMedia ? (
+                                            isVideo ? (
+                                                <video src={firstMedia} className="w-full h-full object-cover" />
+                                            ) : (
+                                                <img src={firstMedia} alt="Post" className="w-full h-full object-cover" />
+                                            )
+                                        ) : (
+                                            <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-slate-800 to-slate-900 border border-white/5 p-2 text-center">
+                                                <span className="text-3xl mb-2">🌿</span>
+                                                <span className="text-[10px] md:text-sm font-semibold text-slate-300 line-clamp-2 leading-tight">{post.title}</span>
+                                            </div>
+                                        )}
+
+                                        {/* Hover Overlay with Likes & Comments Count */}
+                                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4 text-white font-bold backdrop-blur-sm">
+                                            <div className="flex items-center gap-1.5"><span className="text-xl">❤️</span> {post.likes}</div>
+                                            <div className="flex items-center gap-1.5"><span className="text-xl">💬</span> {post.comments?.length || 0}</div>
+                                        </div>
+
+                                        {/* Multiple images icon indicator if needed */}
+                                        {post.mediaUrls && post.mediaUrls.length > 1 && (
+                                            <div className="absolute top-2 right-2 text-white shadow-md">
+                                                <svg aria-label="Carousel" className="x1lliihq x1n2onr6 x5n08af" fill="currentColor" height="22" role="img" viewBox="0 0 48 48" width="22"><path d="M34.8 29.7V11c0-2.9-2.3-5.2-5.2-5.2H11c-2.9 0-5.2 2.3-5.2 5.2v18.7c0 2.9 2.3 5.2 5.2 5.2h18.7c2.8-.1 5.1-2.4 5.1-5.2zM39.2 15v16.1c0 4.5-3.7 8.1-8.1 8.1H14.9c-1 0-2-.9-2-2s.9-2 2-2h16.1c2.3 0 4.1-1.8 4.1-4.1V15c0-1 .9-2 2-2s2 .9 2 2z"></path></svg>
+                                            </div>
+                                        )}
+                                    </div>
+                                )
+                            })}
                         </div>
                     ) : (
                         <div className="text-center py-20 px-4 glass-panel rounded-2xl border border-white/5">
@@ -190,6 +229,22 @@ export default function PublicProfilePage() {
                     )}
                 </div>
             </div>
+
+            {/* Instagram Style Post Modal */}
+            {selectedPost && (
+                <InstagramPostModal
+                    post={selectedPost}
+                    onClose={() => setSelectedPost(null)}
+                    // To fetch updated comment/like counts for grid
+                    onUpdate={() => {
+                        communityApi.getAll().then(res => {
+                            const userPosts = res.posts.filter((p: any) => p.userName === userName && !p.isAnonymous);
+                            setPosts(userPosts);
+                            setSelectedPost(userPosts.find((p: any) => p.id === selectedPost.id) || null);
+                        });
+                    }}
+                />
+            )}
         </div>
     );
 }

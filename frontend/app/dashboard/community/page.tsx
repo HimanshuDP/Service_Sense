@@ -30,7 +30,7 @@ export default function CommunityDashboard() {
     const loadPosts = useCallback(async () => {
         setLoading(true);
         try {
-            const res = await communityApi.getPosts({
+            const res = await communityApi.getAll({
                 category: catFilter === 'all' ? '' : catFilter,
                 locality: localityParam,
                 page,
