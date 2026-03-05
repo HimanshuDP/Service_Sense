@@ -16,9 +16,13 @@ export default function InstagramPostModal({ post, onClose, onUpdate }: Props) {
     const theme = CATEGORY_THEMES[post.category] ?? CATEGORY_THEMES.general;
     const { user } = useAuth();
 
+    // Fallbacks
+    const currentUserId = user?.uid || 'guest-user';
+    const currentUserName = user?.userName || user?.displayName || 'Guest User';
+
     // Local state for instant UI updates
     const [likes, setLikes] = useState(post.likes);
-    const [liked, setLiked] = useState(false);
+    const [liked, setLiked] = useState(post.likedBy?.includes(currentUserId) ?? false);
     const [commentText, setCommentText] = useState('');
     const [comments, setComments] = useState(post.comments);
     const [acting, setActing] = useState(false);
@@ -38,7 +42,7 @@ export default function InstagramPostModal({ post, onClose, onUpdate }: Props) {
 
     const handleLike = async () => {
         try {
-            const res = await communityApi.likePost(post.id, user?.uid || 'guest-user');
+            const res = await communityApi.likePost(post.id, currentUserId);
             setLikes(res.likes);
             setLiked((prev) => !prev);
             onUpdate?.();
@@ -55,8 +59,8 @@ export default function InstagramPostModal({ post, onClose, onUpdate }: Props) {
 
         try {
             const newComment = {
-                userId: user?.uid || 'guest-user',
-                userName: user?.displayName || user?.userName || 'Guest User',
+                userId: currentUserId,
+                userName: currentUserName,
                 text: commentText,
                 createdAt: new Date().toISOString()
             };
@@ -159,13 +163,13 @@ export default function InstagramPostModal({ post, onClose, onUpdate }: Props) {
                         {/* List of Comments */}
                         {comments.map((c, i) => (
                             <div key={i} className="flex gap-3">
-                                <Link href={`/u/${c.userName}`} onClick={onClose} className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold shrink-0 mt-1 hover:opacity-80 text-slate-300">
-                                    {c.userName[0]?.toUpperCase()}
+                                <Link href={`/u/${c.userName || 'anonymous'}`} onClick={onClose} className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-xs font-bold shrink-0 mt-1 hover:opacity-80 text-slate-300">
+                                    {(c.userName || 'A')[0]?.toUpperCase()}
                                 </Link>
                                 <div>
                                     <p className="text-sm text-slate-300">
-                                        <Link href={`/u/${c.userName}`} onClick={onClose} className="font-semibold text-white mr-2 hover:underline">
-                                            {c.userName}
+                                        <Link href={`/u/${c.userName || 'anonymous'}`} onClick={onClose} className="font-semibold text-white mr-2 hover:underline">
+                                            {c.userName || 'Anonymous'}
                                         </Link>
                                         {c.text}
                                     </p>

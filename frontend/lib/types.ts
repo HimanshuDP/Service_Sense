@@ -59,6 +59,7 @@ export interface CommunityPost {
     locality: string;
     mediaUrls?: string[];
     likes: number;
+    likedBy?: string[];
     comments: Comment[];
     aiVerification: VerificationStatus;
     verificationReason?: string;

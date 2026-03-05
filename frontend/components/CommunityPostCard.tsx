@@ -4,6 +4,7 @@ import { CommunityPost, CATEGORY_THEMES, VerificationStatus } from '@/lib/types'
 import { useState } from 'react';
 import Link from 'next/link';
 import { communityApi } from '@/lib/api';
+import { useAuth } from '@/lib/AuthContext';
 
 interface Props {
     post: CommunityPost;
@@ -19,10 +20,16 @@ const BADGE_MAP: Record<VerificationStatus, { label: string; color: string; icon
 export default function CommunityPostCard({ post, onUpdate }: Props) {
     const theme = CATEGORY_THEMES[post.category] ?? CATEGORY_THEMES.general;
     const badge = BADGE_MAP[post.aiVerification];
+    const { user } = useAuth();
+
+    // Fallbacks
+    const currentUserId = user?.uid || 'guest-user';
+    const currentUserName = user?.userName || user?.displayName || 'Guest User';
+
     const [showComment, setShowComment] = useState(false);
     const [commentText, setCommentText] = useState('');
     const [likes, setLikes] = useState(post.likes);
-    const [liked, setLiked] = useState(false);
+    const [liked, setLiked] = useState((post.likedBy ?? []).includes(currentUserId));
     const [commenting, setCommenting] = useState(false);
 
     const timeAgo = (dateStr: string) => {
@@ -35,7 +42,7 @@ export default function CommunityPostCard({ post, onUpdate }: Props) {
 
     const handleLike = async () => {
         try {
-            const res = await communityApi.likePost(post.id, 'guest-user');
+            const res = await communityApi.likePost(post.id, currentUserId);
             setLikes(res.likes);
             setLiked((prev) => !prev);
         } catch {
@@ -49,8 +56,8 @@ export default function CommunityPostCard({ post, onUpdate }: Props) {
         setCommenting(true);
         try {
             await communityApi.addComment(post.id, {
-                userId: 'guest-user',
-                userName: 'Guest User',
+                userId: currentUserId,
+                userName: currentUserName,
                 text: commentText,
             });
             setCommentText('');
@@ -158,10 +165,10 @@ export default function CommunityPostCard({ post, onUpdate }: Props) {
             </div>
 
             {/* Impact updates */}
-            {post.updates.length > 0 && (
+            {(post.updates?.length ?? 0) > 0 && (
                 <div className="relative bg-white/5 rounded-xl p-3 text-xs text-slate-400">
                     <p className="font-semibold text-slate-300 mb-1">📸 Latest Update:</p>
-                    <p className="line-clamp-2">{post.updates[post.updates.length - 1].text}</p>
+                    <p className="line-clamp-2">{post.updates![post.updates!.length - 1].text}</p>
                 </div>
             )}
 
@@ -179,7 +186,7 @@ export default function CommunityPostCard({ post, onUpdate }: Props) {
                     onClick={() => setShowComment((v) => !v)}
                     className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-white transition-colors"
                 >
-                    💬 <span>{post.comments.length}</span>
+                    💬 <span>{post.comments?.length ?? 0}</span>
                 </button>
 
                 <span className="ml-auto text-xs text-slate-600">
@@ -208,9 +215,9 @@ export default function CommunityPostCard({ post, onUpdate }: Props) {
             )}
 
             {/* Comments */}
-            {post.comments.slice(-2).map((c, i) => (
+            {(post.comments ?? []).slice(-2).map((c, i) => (
                 <div key={i} className="bg-white/5 rounded-xl px-3 py-2 text-xs text-slate-400 relative">
-                    <span className="font-medium text-slate-300">{c.userName}: </span>
+                    <span className="font-medium text-slate-300">{c.userName || 'Anonymous'}: </span>
                     {c.text}
                 </div>
             ))}

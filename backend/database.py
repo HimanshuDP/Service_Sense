@@ -82,24 +82,47 @@ def rtdb_push(collection: str, data: dict) -> str:
 
 def rtdb_get_all(collection: str) -> dict:
     """Returns {key: data} dict or {}."""
-    return get_ref(f"/{collection}").get() or {}
+    try:
+        data = get_ref(f"/{collection}").get()
+        return data or {}
+    except Exception as e:
+        # Firebase throws 404 when a node path does not exist
+        err_str = str(type(e)) + str(e)
+        print(f"[rtdb_get_all] exception for '{collection}': {err_str[:200]}")
+        if "404" in err_str or "Not Found" in err_str:
+            return {}
+        raise
 
 
 def rtdb_get_one(collection: str, key: str) -> dict | None:
-    data = get_ref(f"/{collection}/{key}").get()
-    if data:
-        data["id"] = key
-    return data
+    try:
+        data = get_ref(f"/{collection}/{key}").get()
+        if data:
+            data["id"] = key
+        return data
+    except Exception as e:
+        err_str = str(type(e)) + str(e)
+        print(f"[rtdb_get_one] exception for '{collection}/{key}': {err_str[:200]}")
+        if "404" in err_str or "Not Found" in err_str:
+            return None
+        raise
 
 
 def rtdb_update(collection: str, key: str, updates: dict):
     get_ref(f"/{collection}/{key}").update(updates)
 
 
-def rtdb_as_list(raw: dict, filters: dict = {}, sort_key: str = "publishedAt",
+def rtdb_delete(collection: str, key: str):
+    get_ref(f"/{collection}/{key}").delete()
+
+
+def rtdb_as_list(raw: dict | None, filters: dict = {}, sort_key: str = "publishedAt",
                  reverse: bool = True, offset: int = 0, limit: int = 50,
                  search_query: str = "", time_filter: str = "") -> tuple[list, int]:
     """Convert {key: data} to a filtered, sorted, paginated list."""
+    if raw is None:
+        raw = {}
+        
     items = [{"id": k, **v} for k, v in raw.items()]
     for fk, fv in filters.items():
         if fv:
@@ -198,6 +221,11 @@ def demo_update(collection: str, doc_id: str, updates: dict):
     for d in _demo_store.get(collection, []):
         if d.get("id") == doc_id:
             d.update(updates)
+
+
+def demo_delete(collection: str, doc_id: str):
+    collection_list = _demo_store.get(collection, [])
+    _demo_store[collection] = [d for d in collection_list if d.get("id") != doc_id]
 
 
 def _seed_demo_data():

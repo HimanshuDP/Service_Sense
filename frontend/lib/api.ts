@@ -112,6 +112,7 @@ export const authApi = {
     register: (data: any) => request<TokenResponse>('/api/auth/register', { method: 'POST', body: JSON.stringify(data) }),
     getMe: () => request<User>('/api/auth/me'),
     updateProfile: (data: Partial<User>) => request<User>('/api/auth/me', { method: 'PUT', body: JSON.stringify(data) }),
+    deleteAccount: () => request<{ status: string }>('/api/auth/me', { method: 'DELETE' }),
     checkUsername: (username: string) => request<{ available: boolean }>(`/api/auth/check-username?username=${username}`),
     getUserProfile: (username: string) => request<User>(`/api/auth/users/${username}`),
     followUser: (username: string) => request<any>(`/api/auth/users/${username}/follow`, { method: 'POST' }),

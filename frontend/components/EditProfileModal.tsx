@@ -10,7 +10,7 @@ interface EditProfileModalProps {
 }
 
 export default function EditProfileModal({ onClose, onUpdate }: EditProfileModalProps) {
-    const { user, isDemo } = useAuth();
+    const { user, isDemo, logout } = useAuth();
 
     const [formData, setFormData] = useState({
         displayName: user?.displayName || '',
@@ -20,6 +20,7 @@ export default function EditProfileModal({ onClose, onUpdate }: EditProfileModal
     });
 
     const [loading, setLoading] = useState(false);
+    const [deleting, setDeleting] = useState(false);
     const [error, setError] = useState('');
 
     const [userNameAvailable, setUserNameAvailable] = useState<boolean | null>(null);
@@ -80,6 +81,24 @@ export default function EditProfileModal({ onClose, onUpdate }: EditProfileModal
             setError(err.message || 'Failed to update profile');
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleDelete = async () => {
+        if (!window.confirm("Are you sure you want to permanently delete your account? This action cannot be undone.")) return;
+
+        setDeleting(true);
+        setError('');
+
+        try {
+            if (!isDemo) {
+                await authApi.deleteAccount();
+            }
+            await logout(); // Closes modal implicitly because user becomes null
+            window.location.href = '/'; // Redirect to home page
+        } catch (err: any) {
+            setError(err.message || 'Failed to delete account');
+            setDeleting(false);
         }
     };
 
@@ -161,12 +180,22 @@ export default function EditProfileModal({ onClose, onUpdate }: EditProfileModal
 
                     <button
                         type="submit"
-                        disabled={loading}
+                        disabled={loading || deleting}
                         className="btn-primary w-full justify-center mt-2 disabled:opacity-50 !bg-gradient-to-r !from-blue-600 !to-purple-600"
                     >
                         {loading ? 'Saving...' : 'Save Changes'}
                     </button>
                 </form>
+
+                <div className="mt-6 pt-4 border-t border-white/10">
+                    <button
+                        onClick={handleDelete}
+                        disabled={loading || deleting}
+                        className="w-full text-red-400 hover:text-red-300 text-xs font-semibold py-2 transition-colors flex justify-center items-center"
+                    >
+                        {deleting ? 'Deleting...' : 'Delete Account'}
+                    </button>
+                </div>
             </div>
         </div>
     );

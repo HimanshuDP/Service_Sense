@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
-from database import _is_demo, demo_add, demo_list, rtdb_push, rtdb_get_all, rtdb_update, demo_update
+from database import _is_demo, demo_add, demo_list, rtdb_push, rtdb_get_all, rtdb_update, demo_update, rtdb_delete, demo_delete
 from models.schemas import UserCreate, UserLogin, UserResponse, TokenResponse, UserUpdate
 from datetime import datetime, timedelta
 import jwt
@@ -220,6 +220,15 @@ async def update_me(update_data: UserUpdate, current_user: dict = Depends(get_cu
         "followingCount": current_user.get("followingCount", 0),
         "createdAt": current_user.get("createdAt", datetime.utcnow().isoformat())
     }
+
+@router.delete("/me")
+async def delete_me(current_user: dict = Depends(get_current_user)):
+    user_id = current_user["id"]
+    if _is_demo():
+        demo_delete("users", user_id)
+    else:
+        rtdb_delete("users", user_id)
+    return {"status": "deleted", "message": "Account successfully deleted"}
 
 @router.get("/users/{username}", response_model=UserResponse)
 async def get_public_profile(username: str):
