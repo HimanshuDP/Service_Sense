@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query, HTTPException, UploadFile, File
 from database import (
     _is_demo, demo_add, demo_list, demo_get, demo_update,
     rtdb_push, rtdb_get_all, rtdb_get_one, rtdb_update, rtdb_as_list
@@ -162,3 +162,74 @@ async def add_impact_update(post_id: str, req: ImpactUpdateRequest):
         rtdb_update("community_posts", post_id, {"updates": updates_list})
 
     return {"message": "Impact update added", "update": entry}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Image Classification  —  Environmental Verification Layer
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.post("/classify-image")
+async def classify_image(file: UploadFile = File(...)):
+    """
+    Verify whether an uploaded image is related to an environmental issue.
+
+    - Accepts: JPEG / PNG / WebP images
+    - Returns: predicted category, confidence score, and accept/reject decision
+
+    Decision logic:
+      accepted = True  →  category in {air, land, water, waste}
+                           AND confidence >= 0.70
+      accepted = False →  category == 'general'
+                           OR confidence < 0.70
+    """
+    # Validate file type
+    content_type = file.content_type or ""
+    if not content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=415,
+            detail="Only image files (JPEG, PNG, WebP) are accepted.",
+        )
+
+    image_bytes = await file.read()
+    if len(image_bytes) == 0:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    # Lazy import — model loads only when first request arrives
+    try:
+        from ml.image_classifier.predict import predict_image
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Image classification model is not yet trained. "
+                "Run: python ml/image_classifier/train_image_model.py"
+            ),
+        ) from exc
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Image classification dependencies not installed: {exc}",
+        ) from exc
+
+    try:
+        result = predict_image(image_bytes)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Could not process the image: {exc}",
+        ) from exc
+
+    return {
+        "category":   result["category"],
+        "confidence": result["confidence"],
+        "accepted":   result["accepted"],
+        "all_scores": result["all_scores"],
+        "message": (
+            f"✅ Image accepted as '{result['category']}' "
+            f"(confidence: {result['confidence']*100:.1f}%)"
+            if result["accepted"] else
+            f"❌ Image rejected — "
+            f"category: '{result['category']}', "
+            f"confidence: {result['confidence']*100:.1f}%"
+        ),
+    }

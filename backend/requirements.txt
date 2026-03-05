@@ -12,3 +12,6 @@ joblib==1.3.2
 numpy==1.26.3
 pandas==2.2.0
 python-multipart==0.0.6
+# ── Image Classification (ML model) ──────────────────────────────────────────
+tensorflow==2.15.0
+Pillow>=10.0.0
