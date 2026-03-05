@@ -1,20 +1,22 @@
 """
-predict.py — Multi-Binary-Model Inference for Yukti Innovation
-===============================================================
-Loads up to 4 binary MobileNetV2 models (one per environmental category)
-and runs them all on a single uploaded image.
+predict.py — Smart Image Classifier for Yukti Innovation
+=========================================================
+AUTO-SELECTS between two modes:
 
-Decision logic:
-  - Find the category with the HIGHEST confidence score
-  - If that score >= 0.70  →  post ACCEPTED with that category
-  - If all scores < 0.70   →  post REJECTED (not environmental)
+  MODE 1 — Trained binary models (.h5)
+    Used when: any of {air,water,land,waste}_model.h5 exist in models/
+    Runs all available MobileNetV2 binary classifiers in parallel.
 
-Models expected at: ml/image_classifier/models/
-  air_model.h5
-  water_model.h5
-  land_model.h5
-  waste_model.h5
-  (missing models are skipped gracefully — train at least one to start)
+  MODE 2 — CLIP zero-shot (pretrained fallback)
+    Used when: no .h5 models have been trained yet
+    Uses OpenAI CLIP via HuggingFace Transformers. No training needed.
+
+Transition is automatic — once you drop trained .h5 files into models/
+and restart the server, the system switches to MODE 1 permanently.
+
+Decision logic (same for both modes):
+  accepted = True  →  best category confidence >= 0.70
+  accepted = False →  all confidence scores < 0.70
 """
 
 from __future__ import annotations
@@ -22,7 +24,6 @@ from __future__ import annotations
 import io
 import os
 import sys
-from typing import Optional
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Paths
@@ -31,72 +32,77 @@ from typing import Optional
 SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR  = os.path.join(SCRIPT_DIR, "models")
 
-CATEGORIES          = ["air", "water", "land", "waste"]
-IMG_SIZE            = (224, 224)
+CATEGORIES           = ["air", "water", "land", "waste"]
+IMG_SIZE             = (224, 224)
 CONFIDENCE_THRESHOLD = 0.70
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Internal state — models loaded lazily on first request
+# Internal state
 # ──────────────────────────────────────────────────────────────────────────────
 
-_models: dict[str, object] = {}   # category → Keras model
-_tf_ready: bool = False
+_trained_models: dict[str, object] = {}   # category → Keras model
+_mode: str = "unknown"                    # "trained" | "pretrained_clip"
+_initialized: bool = False
 
 
-def _load_all_models() -> None:
-    """Load all available binary models into memory (called once)."""
-    global _models, _tf_ready
+def _check_trained_models() -> list[str]:
+    """Return list of categories that have a trained .h5 model ready."""
+    available = []
+    for cat in CATEGORIES:
+        if os.path.exists(os.path.join(MODELS_DIR, f"{cat}_model.h5")):
+            available.append(cat)
+    return available
 
-    if _tf_ready:
+
+def _initialize() -> None:
+    """Detect available models and set inference mode. Called once."""
+    global _trained_models, _mode, _initialized
+
+    if _initialized:
         return
 
-    try:
-        import tensorflow as tf
-        from tensorflow.keras.models import load_model
-    except ImportError:
-        raise ImportError(
-            "TensorFlow is not installed.\n"
-            "Run:  pip install tensorflow Pillow"
-        )
+    available = _check_trained_models()
 
-    loaded = []
-    missing = []
+    if available:
+        # ── MODE 1: Load trained binary .h5 models ───────────────────────────
+        try:
+            from tensorflow.keras.models import load_model
+        except ImportError:
+            raise ImportError("TensorFlow is required: pip install tensorflow")
 
-    for cat in CATEGORIES:
-        model_path = os.path.join(MODELS_DIR, f"{cat}_model.h5")
-        if os.path.exists(model_path):
+        loaded = []
+        for cat in available:
+            path = os.path.join(MODELS_DIR, f"{cat}_model.h5")
             try:
-                _models[cat] = load_model(model_path)
+                _trained_models[cat] = load_model(path)
                 loaded.append(cat)
             except Exception as e:
                 print(f"[WARNING] Could not load {cat}_model.h5: {e}", file=sys.stderr)
+
+        if loaded:
+            _mode = "trained"
+            print(f"[Yukti Classifier] MODE: Trained binary models — {loaded}", file=sys.stderr)
         else:
-            missing.append(cat)
-
-    if not loaded:
-        raise FileNotFoundError(
-            f"No trained models found in: {MODELS_DIR}\n"
-            "Train at least one model first:\n"
-            "  python ml/image_classifier/train_image_model.py --category air\n"
-            "  python ml/image_classifier/train_image_model.py --category waste\n"
-            "  ... (or --category all)"
-        )
-
-    if missing:
+            _mode = "pretrained_clip"
+            print("[Yukti Classifier] MODE: CLIP pretrained (trained models failed to load)", file=sys.stderr)
+    else:
+        # ── MODE 2: CLIP zero-shot fallback ──────────────────────────────────
+        _mode = "pretrained_clip"
         print(
-            f"[INFO] Models loaded: {loaded} | Not yet trained: {missing}",
+            "[Yukti Classifier] MODE: CLIP pretrained (no .h5 models found)\n"
+            "  Train models with: python ml/image_classifier/train_image_model.py --category all",
             file=sys.stderr,
         )
 
-    _tf_ready = True
+    _initialized = True
 
 
-def _preprocess_image(image_bytes: bytes):
-    """Decode raw bytes, resize to 224×224, apply MobileNetV2 preprocessing."""
+def _preprocess_for_keras(image_bytes: bytes):
+    """Preprocess image bytes for MobileNetV2 binary models."""
     try:
         from PIL import Image
     except ImportError:
-        raise ImportError("Pillow is not installed. Run:  pip install Pillow")
+        raise ImportError("Pillow is required: pip install Pillow")
 
     import numpy as np
     from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
@@ -105,7 +111,7 @@ def _preprocess_image(image_bytes: bytes):
     img = img.resize(IMG_SIZE, Image.LANCZOS)
     arr = np.array(img, dtype=np.float32)
     arr = preprocess_input(arr)
-    return arr[np.newaxis, ...]   # shape: (1, 224, 224, 3)
+    return arr[None, ...]   # (1, 224, 224, 3)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -114,7 +120,7 @@ def _preprocess_image(image_bytes: bytes):
 
 def predict_image(image_bytes: bytes) -> dict:
     """
-    Run all available binary models on the image and return the verdict.
+    Classify an environmental image using whichever mode is available.
 
     Parameters
     ----------
@@ -124,66 +130,89 @@ def predict_image(image_bytes: bytes) -> dict:
     Returns
     -------
     dict:
-        category   (str | None) — winning category, or None if rejected
-        confidence (float)      — confidence of the winning category (0–1)
-        accepted   (bool)       — True if environmental and confident
-        all_scores (dict)       — confidence from every loaded model
-        models_used (list)      — categories whose models were available
+        category    (str | None) — winning category or None if rejected
+        confidence  (float)      — best confidence score (0–1)
+        accepted    (bool)       — True if env. category with >= 70% confidence
+        all_scores  (dict)       — score per category
+        mode        (str)        — "trained" or "pretrained_clip"
 
     Raises
     ------
-    FileNotFoundError  if no models have been trained yet.
-    ValueError         if the image cannot be decoded.
+    ValueError  if the image cannot be decoded.
+    ImportError if required packages are missing.
     """
-    _load_all_models()
+    _initialize()
 
     try:
-        arr = _preprocess_image(image_bytes)
+        if _mode == "trained":
+            return _predict_with_trained_models(image_bytes)
+        else:
+            return _predict_with_clip(image_bytes)
+    except Exception as e:
+        if "decode" in str(e).lower() or "image" in str(e).lower():
+            raise ValueError(f"Could not process image: {e}") from e
+        raise
+
+
+def _predict_with_trained_models(image_bytes: bytes) -> dict:
+    """Run all loaded binary .h5 models and pick the highest score."""
+    import numpy as np
+
+    try:
+        arr = _preprocess_for_keras(image_bytes)
     except Exception as e:
         raise ValueError(f"Could not decode image: {e}") from e
 
     all_scores: dict[str, float] = {}
-
-    for cat, model in _models.items():
-        # Binary sigmoid output → probability of "positive" (environmental) class
+    for cat, model in _trained_models.items():
         prob = float(model.predict(arr, verbose=0)[0][0])
         all_scores[cat] = round(prob, 4)
 
-    # Pick the category with the highest confidence
-    if all_scores:
-        best_cat   = max(all_scores, key=all_scores.get)
-        best_score = all_scores[best_cat]
-    else:
-        best_cat   = None
-        best_score = 0.0
-
-    accepted = best_score >= CONFIDENCE_THRESHOLD
+    best_cat   = max(all_scores, key=all_scores.get) if all_scores else None
+    best_score = all_scores[best_cat] if best_cat else 0.0
+    accepted   = best_score >= CONFIDENCE_THRESHOLD
 
     return {
         "category":    best_cat if accepted else None,
         "confidence":  round(best_score, 4),
         "accepted":    accepted,
         "all_scores":  all_scores,
-        "models_used": list(_models.keys()),
+        "mode":        "trained",
     }
 
 
-def predict_image_verbose(image_bytes: bytes) -> dict:
-    """Same as predict_image but includes detailed per-model breakdown."""
-    result = predict_image(image_bytes)
+def _predict_with_clip(image_bytes: bytes) -> dict:
+    """Delegate to CLIP zero-shot classifier."""
+    try:
+        from ml.image_classifier.pretrained_classifier import classify_with_clip
+    except ImportError:
+        # Try relative import (when used standalone)
+        from pretrained_classifier import classify_with_clip
 
-    breakdown = {}
-    for cat, score in result["all_scores"].items():
-        breakdown[cat] = {
-            "confidence": score,
+    return classify_with_clip(image_bytes)
+
+
+def predict_image_verbose(image_bytes: bytes) -> dict:
+    """Same as predict_image with per-category breakdown added."""
+    result = predict_image(image_bytes)
+    result["breakdown"] = {
+        cat: {
+            "confidence":  score,
             "is_detected": score >= CONFIDENCE_THRESHOLD,
         }
-    result["breakdown"] = breakdown
+        for cat, score in result.get("all_scores", {}).items()
+    }
     return result
 
 
+def get_current_mode() -> str:
+    """Return the active inference mode string."""
+    _initialize()
+    return _mode
+
+
 # ──────────────────────────────────────────────────────────────────────────────
-# Quick CLI test
+# CLI
 # ──────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -191,26 +220,27 @@ if __name__ == "__main__":
         print("Usage: python predict.py <image_path>")
         sys.exit(1)
 
-    img_path = sys.argv[1]
-    if not os.path.exists(img_path):
-        print(f"File not found: {img_path}")
+    path = sys.argv[1]
+    if not os.path.exists(path):
+        print(f"File not found: {path}")
         sys.exit(1)
 
-    with open(img_path, "rb") as fh:
+    with open(path, "rb") as fh:
         data = fh.read()
 
     result = predict_image_verbose(data)
 
-    print(f"\n{'='*50}")
-    print(f"  Yukti Innovation — Image Analysis Result")
-    print(f"{'='*50}")
-    print(f"  Models used  : {result['models_used']}")
-    print(f"  Category     : {(result['category'] or 'NONE').upper()}")
-    print(f"  Confidence   : {result['confidence']:.4f} ({result['confidence']*100:.1f}%)")
-    print(f"  Decision     : {'✅ ACCEPTED' if result['accepted'] else '❌ REJECTED'}")
-    print(f"\n  Per-model Scores:")
-    for cat, info in sorted(result["breakdown"].items(), key=lambda x: -x[1]["confidence"]):
-        bar    = "█" * int(info["confidence"] * 30)
+    print(f"\n{'='*55}")
+    print(f"  Yukti Innovation — Environmental Image Analysis")
+    print(f"{'='*55}")
+    print(f"  Mode       : {result['mode'].upper()}")
+    print(f"  Category   : {(result.get('category') or 'NONE').upper()}")
+    print(f"  Confidence : {result['confidence']:.4f} ({result['confidence']*100:.1f}%)")
+    print(f"  Decision   : {'✅ ACCEPTED' if result['accepted'] else '❌ REJECTED'}")
+    print(f"\n  Per-Category Scores:")
+    for cat, info in sorted(result.get("breakdown", {}).items(),
+                            key=lambda x: -x[1]["confidence"]):
+        bar    = "█" * int(info["confidence"] * 35)
         status = "✅" if info["is_detected"] else "  "
         print(f"    {status} {cat:<8}  {info['confidence']:.4f}  {bar}")
     print()

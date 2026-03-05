@@ -224,6 +224,7 @@ async def classify_image(file: UploadFile = File(...)):
         "confidence": result["confidence"],
         "accepted":   result["accepted"],
         "all_scores": result["all_scores"],
+        "mode":       result.get("mode", "unknown"),
         "message": (
             f"✅ Image accepted as '{result['category']}' "
             f"(confidence: {result['confidence']*100:.1f}%)"

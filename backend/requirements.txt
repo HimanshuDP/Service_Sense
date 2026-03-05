@@ -15,3 +15,6 @@ python-multipart==0.0.6
 # ── Image Classification (ML model) ──────────────────────────────────────────
 tensorflow==2.15.0
 Pillow>=10.0.0
+# CLIP pretrained fallback (used when no .h5 models are trained yet)
+transformers>=4.35.0
+torch>=2.0.0
