@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Query, HTTPException, UploadFile, File, Depends
+from pydantic import BaseModel
 from database import (
     _is_demo, demo_add, demo_list, demo_get, demo_update, demo_delete,
     rtdb_push, rtdb_get_all, rtdb_get_one, rtdb_update, rtdb_as_list, rtdb_delete
@@ -15,6 +16,20 @@ def _credibility_score(likes: int, ai_status: str) -> float:
     ai_weight = {"valid": 0.5, "needs_review": 0.2, "invalid": 0.0}.get(ai_status, 0.2)
     like_score = min(likes / 50.0, 0.3)
     return round(ai_weight + like_score, 3)
+
+
+class TextClassifyRequest(BaseModel):
+    title: str
+    description: str
+    category: str = "general"
+
+
+@router.post("/classify-text")
+async def classify_text(req: TextClassifyRequest):
+    """Lightweight endpoint to validate post text before submission."""
+    result = await verify_post(req.title, req.description, req.category)
+    return {"status": result["status"], "reason": result.get("reason", ""), "accepted": result["status"] != "invalid"}
+
 
 
 @router.post("/posts")

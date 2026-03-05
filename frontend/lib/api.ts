@@ -36,6 +36,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
                 throw new Error(errBody.detail || `Classification failed (${res.status})`);
             }
 
+            // For community mutations (POST/PUT/DELETE), surface errors to the user
+            const method = options?.method?.toUpperCase() || 'GET';
+            if (path.startsWith('/api/community') && method !== 'GET') {
+                throw new Error(errBody.detail || `Request failed (${res.status})`);
+            }
+
             console.warn(`[Offline Fallback] using static demo data.`);
             return getFallbackData(path) as T;
         }
@@ -126,6 +132,12 @@ export const communityApi = {
     deletePost: (postId: string) =>
         request<{ status: string; message: string }>(`/api/community/posts/${postId}`, {
             method: 'DELETE',
+        }),
+
+    classifyText: (title: string, description: string, category: string) =>
+        request<{ status: string; reason: string; accepted: boolean }>('/api/community/classify-text', {
+            method: 'POST',
+            body: JSON.stringify({ title, description, category }),
         }),
 };
 

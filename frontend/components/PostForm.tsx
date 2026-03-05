@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { communityApi } from '@/lib/api';
 import { EnvCategory } from '@/lib/types';
 import { useAuth, createGuestUser } from '@/lib/AuthContext';
@@ -32,34 +32,85 @@ export default function PostForm({ onSuccess }: Props) {
     const [files, setFiles] = useState<{ file: File, status: 'pending' | 'valid' | 'invalid', message?: string }[]>([]);
     const [isValidating, setIsValidating] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+    // Text validation state: null = not checked yet, 'valid'|'needs_review'|'invalid'
+    const [textValidation, setTextValidation] = useState<{ status: string; reason: string } | null>(null);
+    const [isValidatingText, setIsValidatingText] = useState(false);
+
+    const set = (k: string, v: string) => {
+        setForm((f) => ({ ...f, [k]: v }));
+        if (k === 'title' || k === 'description' || k === 'category') {
+            setTextValidation(null);
+        }
+    };
+
+    // Debounced text validation: fires 1.5s after the user stops typing title or description
+    useEffect(() => {
+        const titleOk = form.title.trim().length >= 5;
+        const descOk = form.description.trim().length >= 15;
+        if (!titleOk || !descOk) {
+            setTextValidation(null);
+            return;
+        }
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+        debounceRef.current = setTimeout(async () => {
+            setIsValidatingText(true);
+            try {
+                const res = await communityApi.classifyText(form.title, form.description, form.category);
+                setTextValidation({ status: res.status, reason: res.reason });
+            } catch {
+                setTextValidation(null); // silently skip if backend offline
+            } finally {
+                setIsValidatingText(false);
+            }
+        }, 1500);
+        return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+    }, [form.title, form.description, form.category]);
+
+    const titleMeetsMin = form.title.trim().length >= 5;
+    const descMeetsMin = form.description.trim().length >= 15;
+    const localityOk = form.locality.trim().length > 0;
+    const isTextChecking = (titleMeetsMin && descMeetsMin && textValidation === null) || isValidatingText;
+    const isImageChecking = isValidating || files.some(f => f.status === 'pending');
+    const isImageInvalid = files.some(f => f.status === 'invalid');
+    const isTextInvalid = textValidation?.status === 'invalid';
+    const hasRequiredFields = titleMeetsMin && descMeetsMin && localityOk && files.length > 0;
+
+    const canSubmit = !submitting && !isTextChecking && !isImageChecking && !isImageInvalid && !isTextInvalid && hasRequiredFields;
 
     // Resolved user (either real Firebase user or demo session user)
     const activeUser = sessionUser || user;
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!activeUser) return;
-        if (!form.title.trim() || !form.description.trim() || !form.locality.trim()) return;
+        if (!activeUser || !canSubmit) return;
 
         setSubmitting(true);
         setResult({ status: 'info', message: 'Uploading media...' });
 
         try {
-            // Check if any files are invalid or still pending
-            if (files.some(f => f.status === 'invalid')) {
+            // Additional safety checks (though canSubmit covers basic states)
+            if (isImageInvalid) {
                 setResult({ status: 'error', message: '❌ Please remove invalid images before submitting.' });
                 setSubmitting(false);
                 return;
             }
-            if (files.some(f => f.status === 'pending') || isValidating) {
-                setResult({ status: 'info', message: '⏳ Still analyzing images, please wait...' });
+            if (isImageChecking) {
+                setResult({ status: 'error', message: '⏳ Please wait for image validation to complete.' });
                 setSubmitting(false);
                 return;
             }
-
-            setResult({ status: 'info', message: 'Uploading media...' });
+            if (isTextInvalid) {
+                setResult({ status: 'error', message: '❌ Please fix irrelevant description before submitting.' });
+                setSubmitting(false);
+                return;
+            }
+            if (isTextChecking) {
+                setResult({ status: 'error', message: '⏳ Please wait for text validation to complete.' });
+                setSubmitting(false);
+                return;
+            }
 
             let mediaUrls: string[] = [];
             if (!isDemo && files.length > 0) {
@@ -378,6 +429,34 @@ export default function PostForm({ onSuccess }: Props) {
                 </label>
             </div>
 
+            {/* Validation Banner */}
+            {isTextChecking && (
+                <div className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium border bg-blue-500/10 border-blue-500/30 text-blue-400">
+                    <span className="animate-spin">⏳</span> AI is checking your description...
+                </div>
+            )}
+            {!isTextChecking && isTextInvalid && (
+                <div className="rounded-xl px-4 py-3 text-sm font-medium border bg-red-500/10 border-red-500/30 text-red-400">
+                    <p className="font-bold">❌ Description Not Relevant</p>
+                    <p className="text-xs mt-1 opacity-80">{textValidation?.reason || 'Your title/description does not appear to be about an environmental issue.'}</p>
+                </div>
+            )}
+            {!isTextChecking && textValidation?.status === 'needs_review' && (
+                <div className="rounded-xl px-4 py-3 text-sm font-medium border bg-yellow-500/10 border-yellow-500/30 text-yellow-400">
+                    ⚠️ <span className="font-bold">Borderline content</span> — your post will be queued for manual review.
+                </div>
+            )}
+            {!isTextChecking && textValidation?.status === 'valid' && (
+                <div className="rounded-xl px-4 py-3 text-sm font-medium border bg-green-500/10 border-green-500/30 text-green-400">
+                    ✅ Description verified as relevant.
+                </div>
+            )}
+            {!localityOk && form.title.length > 0 && (
+                <div className="rounded-xl px-4 py-3 text-sm font-medium border bg-orange-500/10 border-orange-500/30 text-orange-400">
+                    📍 Please specify the locality/area of the issue.
+                </div>
+            )}
+
             {/* Result */}
             {result && (
                 <div className={`rounded-xl px-4 py-3 text-sm font-medium border
@@ -393,21 +472,27 @@ export default function PostForm({ onSuccess }: Props) {
 
             <button
                 type="submit"
-                disabled={submitting || isValidating || files.some(f => f.status === 'invalid')}
-                className={`w-full justify-center py-3 ${(isValidating || files.some(f => f.status === 'invalid'))
-                        ? 'btn-disabled bg-slate-700 text-slate-400 cursor-not-allowed rounded-xl font-bold'
-                        : 'btn-primary'
+                disabled={!canSubmit}
+                className={`w-full justify-center py-3 ${!canSubmit
+                    ? 'btn-disabled bg-slate-700 text-slate-400 cursor-not-allowed rounded-xl font-bold'
+                    : 'btn-primary'
                     }`}>
-                {isValidating ? '⏳ Validating Images...'
-                    : files.some(f => f.status === 'invalid') ? '❌ Remove Invalid Images to Submit'
-                        : submitting ? '⚙️ Processing...'
-                            : '🚀 Submit Report'}
+                {!localityOk ? '📍 Enter Locality to Submit'
+                    : !titleMeetsMin ? '📝 Title too short (min 5 chars)'
+                        : !descMeetsMin ? '📝 Description too short (min 15 chars)'
+                            : isTextChecking ? '⏳ Validating Text...'
+                                : isTextInvalid ? '❌ Fix Description to Submit'
+                                    : isImageChecking ? '⏳ Validating Images...'
+                                        : isImageInvalid ? '❌ Remove Invalid Images to Submit'
+                                            : files.length === 0 ? '📸 Add at least 1 image'
+                                                : submitting ? '⚙️ Processing...'
+                                                    : '🚀 Submit Report'}
             </button>
             <p className="text-xs text-slate-600 text-center">
                 Posting as <strong className="text-slate-400">{activeUser?.displayName || activeUser?.email}</strong>
                 {isDemo && <span className="text-slate-700"> · Demo mode</span>}
                 {' · '}Posts are AI-verified before appearing publicly.
             </p>
-        </form>
+        </form >
     );
 }
