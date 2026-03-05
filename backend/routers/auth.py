@@ -59,6 +59,7 @@ def get_user_by_id(user_id: str):
 
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 security = HTTPBearer()
+optional_security = HTTPBearer(auto_error=False)
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
@@ -74,6 +75,20 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
         return user
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Could not validate credentials")
+
+
+def get_optional_current_user(credentials: HTTPAuthorizationCredentials = Depends(optional_security)):
+    if not credentials:
+        return None
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email = payload.get("sub")
+        if email is None:
+            return None
+        return get_user_by_email(email)
+    except jwt.PyJWTError:
+        return None
 
 
 @router.get("/check-username")

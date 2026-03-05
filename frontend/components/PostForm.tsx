@@ -29,7 +29,8 @@ export default function PostForm({ onSuccess }: Props) {
     });
     const [submitting, setSubmitting] = useState(false);
     const [result, setResult] = useState<{ status: string; message: string } | null>(null);
-    const [files, setFiles] = useState<File[]>([]);
+    const [files, setFiles] = useState<{ file: File, status: 'pending' | 'valid' | 'invalid', message?: string }[]>([]);
+    const [isValidating, setIsValidating] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
@@ -46,6 +47,20 @@ export default function PostForm({ onSuccess }: Props) {
         setResult({ status: 'info', message: 'Uploading media...' });
 
         try {
+            // Check if any files are invalid or still pending
+            if (files.some(f => f.status === 'invalid')) {
+                setResult({ status: 'error', message: '❌ Please remove invalid images before submitting.' });
+                setSubmitting(false);
+                return;
+            }
+            if (files.some(f => f.status === 'pending') || isValidating) {
+                setResult({ status: 'info', message: '⏳ Still analyzing images, please wait...' });
+                setSubmitting(false);
+                return;
+            }
+
+            setResult({ status: 'info', message: 'Uploading media...' });
+
             let mediaUrls: string[] = [];
             if (!isDemo && files.length > 0) {
                 const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
@@ -57,9 +72,9 @@ export default function PostForm({ onSuccess }: Props) {
 
                 const cloudinaryUrl = `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`;
 
-                const uploadPromises = files.map(async (file) => {
+                const uploadPromises = files.map(async (f) => {
                     const formData = new FormData();
-                    formData.append('file', file);
+                    formData.append('file', f.file);
                     formData.append('upload_preset', uploadPreset);
 
                     const response = await fetch(cloudinaryUrl, {
@@ -252,9 +267,57 @@ export default function PostForm({ onSuccess }: Props) {
                         accept="image/*,video/*"
                         className="hidden"
                         ref={fileInputRef}
-                        onChange={(e) => {
-                            if (e.target.files) {
-                                setFiles((prev) => [...prev, ...Array.from(e.target.files!)]);
+                        onChange={async (e) => {
+                            if (e.target.files && e.target.files.length > 0) {
+                                const newFiles = Array.from(e.target.files);
+
+                                // Add to state immediately as pending
+                                const newFileObjs = newFiles.map(f => ({ file: f, status: 'pending' as const }));
+                                setFiles((prev) => [...prev, ...newFileObjs]);
+
+                                setIsValidating(true);
+                                setResult({ status: 'info', message: 'AI is analyzing selected images...' });
+
+                                let hasError = false;
+                                let anyRejected = false;
+                                let bestCat = form.category;
+
+                                for (const fObj of newFileObjs) {
+                                    try {
+                                        const aiResult = await communityApi.classifyImage(fObj.file);
+                                        setFiles(prev => prev.map(p => {
+                                            if (p.file === fObj.file) {
+                                                if (!aiResult.accepted) {
+                                                    anyRejected = true;
+                                                    return { ...p, status: 'invalid', message: `Rejected: ${aiResult.category} (${(aiResult.confidence * 100).toFixed(0)}%)` };
+                                                } else {
+                                                    if (bestCat === 'general' && aiResult.category !== 'general' && aiResult.category) {
+                                                        bestCat = aiResult.category as EnvCategory;
+                                                    }
+                                                    return { ...p, status: 'valid' };
+                                                }
+                                            }
+                                            return p;
+                                        }));
+                                    } catch (err) {
+                                        hasError = true;
+                                        setFiles(prev => prev.map(p => p.file === fObj.file ? { ...p, status: 'invalid', message: 'AI offline / Error' } : p));
+                                    }
+                                }
+
+                                if (bestCat !== form.category) {
+                                    setForm(prev => ({ ...prev, category: bestCat }));
+                                }
+
+                                setIsValidating(false);
+
+                                if (hasError) {
+                                    setResult({ status: 'error', message: '❌ AI Verification failed for some images. Backend may be offline.' });
+                                } else if (anyRejected) {
+                                    setResult({ status: 'invalid', message: '❌ One or more images were rejected by AI. Please remove them.' });
+                                } else {
+                                    setResult({ status: 'valid', message: '✅ All images verified successfully!' });
+                                }
                             }
                         }}
                     />
@@ -263,17 +326,35 @@ export default function PostForm({ onSuccess }: Props) {
                 {/* Media Previews */}
                 {files.length > 0 && (
                     <div className="flex gap-2 mt-3 overflow-x-auto pb-2">
-                        {files.map((file, idx) => (
-                            <div key={idx} className="relative w-20 h-20 rounded-lg overflow-hidden shrink-0 border border-white/10 group">
-                                {file.type.startsWith('video/') ? (
-                                    <video src={URL.createObjectURL(file)} className="w-full h-full object-cover" />
+                        {files.map((fileObj, idx) => (
+                            <div key={idx} className={`relative w-24 h-24 rounded-lg overflow-hidden shrink-0 border-2 group
+                                ${fileObj.status === 'valid' ? 'border-green-500'
+                                    : fileObj.status === 'invalid' ? 'border-red-500'
+                                        : 'border-yellow-500/50 opacity-70'}`}>
+
+                                {fileObj.file.type.startsWith('video/') ? (
+                                    <video src={URL.createObjectURL(fileObj.file)} className="w-full h-full object-cover" />
                                 ) : (
-                                    <img src={URL.createObjectURL(file)} alt="" className="w-full h-full object-cover" />
+                                    <img src={URL.createObjectURL(fileObj.file)} alt="" className="w-full h-full object-cover" />
                                 )}
+
+                                {/* Status Overlay */}
+                                <div className="absolute bottom-0 inset-x-0 bg-black/70 text-center py-0.5">
+                                    <span className="text-[9px] font-bold text-white">
+                                        {fileObj.status === 'pending' ? '⏳ Checking'
+                                            : fileObj.status === 'valid' ? '✅ AI Valid'
+                                                : '❌ Invalid'}
+                                    </span>
+                                </div>
+
                                 <button
                                     type="button"
-                                    onClick={(e) => { e.stopPropagation(); setFiles(files.filter((_, i) => i !== idx)); }}
-                                    className="absolute top-1 right-1 bg-black/60 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setFiles(prev => prev.filter((_, i) => i !== idx));
+                                        if (files.length === 1) setResult(null); // Clear result if list is empty
+                                    }}
+                                    className="absolute top-1 right-1 bg-black/80 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity z-10"
                                 >
                                     ✕
                                 </button>
@@ -310,8 +391,17 @@ export default function PostForm({ onSuccess }: Props) {
                 </div>
             )}
 
-            <button type="submit" disabled={submitting} className="w-full btn-primary justify-center py-3">
-                {submitting ? '⚙️ AI Verifying...' : '🚀 Submit Report'}
+            <button
+                type="submit"
+                disabled={submitting || isValidating || files.some(f => f.status === 'invalid')}
+                className={`w-full justify-center py-3 ${(isValidating || files.some(f => f.status === 'invalid'))
+                        ? 'btn-disabled bg-slate-700 text-slate-400 cursor-not-allowed rounded-xl font-bold'
+                        : 'btn-primary'
+                    }`}>
+                {isValidating ? '⏳ Validating Images...'
+                    : files.some(f => f.status === 'invalid') ? '❌ Remove Invalid Images to Submit'
+                        : submitting ? '⚙️ Processing...'
+                            : '🚀 Submit Report'}
             </button>
             <p className="text-xs text-slate-600 text-center">
                 Posting as <strong className="text-slate-400">{activeUser?.displayName || activeUser?.email}</strong>

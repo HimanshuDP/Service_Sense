@@ -1,10 +1,17 @@
 // API client for Environmental ServiceSense backend
 import { getFallbackData } from './mockData';
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+console.log("[ServiceSense API] Client initialized - v2.1 (Multipart Fix)");
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
     try {
-        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        const headers: Record<string, string> = {};
+
+        // Only default to JSON if we are not sending FormData
+        // (FormData needs the browser to auto-generate the Content-Type with boundary)
+        if (!(options?.body instanceof FormData)) {
+            headers['Content-Type'] = 'application/json';
+        }
 
         // Add auth token if available (client-side only)
         if (typeof window !== 'undefined') {
@@ -13,24 +20,29 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
         }
 
         const res = await fetch(`${BASE_URL}${path}`, {
-            headers: { ...headers, ...options?.headers },
             ...options,
+            headers: { ...headers, ...options?.headers },
         });
         if (!res.ok) {
+            const errBody = await res.json().catch(() => ({}));
+            console.warn(`[API Error] ${res.status} for ${path}:`, errBody);
+
             if (path.startsWith('/api/auth')) {
-                const errData = await res.json().catch(() => ({}));
-                // 401 on /api/auth/me is expected when not logged in — no need to warn
-                if (!(path === '/api/auth/me' && res.status === 401)) {
-                    console.warn(`[Auth] API error ${res.status} for ${path}: ${errData.detail || ''}`);
-                }
-                throw new Error(errData.detail || `Authentication failed: ${res.status}`);
+                throw new Error(errBody.detail || `Authentication failed: ${res.status}`);
             }
-            console.warn(`[Offline Fallback] API error ${res.status} for ${path}, using static demo data.`);
+
+            // DO NOT use fallback for image classification - we want the real error or success
+            if (path.includes('/classify-image')) {
+                throw new Error(errBody.detail || `Classification failed (${res.status})`);
+            }
+
+            console.warn(`[Offline Fallback] using static demo data.`);
             return getFallbackData(path) as T;
         }
         return res.json() as Promise<T>;
     } catch (error) {
-        console.warn(`[Offline Fallback] Connection failed for ${path}, using static demo data.`, error);
+        console.warn(`[Connection Error] for ${path}:`, error);
+        if (path.includes('/classify-image')) throw error;
         return getFallbackData(path) as T;
     }
 }
@@ -75,6 +87,24 @@ export const communityApi = {
     createPost: (data: any) =>
         request<any>('/api/community/posts', { method: 'POST', body: JSON.stringify(data) }),
 
+    classifyImage: (file: File) => {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        console.log("SENDING FILE CLASSIFICATION REQUEST:");
+        console.log("File name:", file.name, "File type:", file.type, "File size:", file.size);
+        for (let pair of formData.entries()) {
+            console.log("FormData:", pair[0], pair[1]);
+        }
+
+        return request<{ category: string; confidence: number; accepted: boolean; all_scores: any; message: string; mode: string }>('/api/community/classify-image', {
+            method: 'POST',
+            body: formData,
+            // Let the browser set the multi-part boundary Content-Type
+        });
+    },
+
+
     likePost: (postId: string, userId: string) =>
         request<any>(`/api/community/posts/${postId}/like`, {
             method: 'PUT',
@@ -91,6 +121,11 @@ export const communityApi = {
         request<any>(`/api/community/posts/${postId}/update`, {
             method: 'POST',
             body: JSON.stringify(data),
+        }),
+
+    deletePost: (postId: string) =>
+        request<{ status: string; message: string }>(`/api/community/posts/${postId}`, {
+            method: 'DELETE',
         }),
 };
 

@@ -1,0 +1,9 @@
+Python: C:\Users\DELL\Desktop\Projects\Converges_Hackathon\backend\venv\Scripts\python.exe
+Paths: ['C:\\Users\\DELL\\Desktop\\Projects\\Converges_Hackathon\\backend', 'C:\\Program Files\\Python310\\python310.zip', 'C:\\Program Files\\Python310\\DLLs', 'C:\\Program Files\\Python310\\lib', 'C:\\Program Files\\Python310', 'C:\\Users\\DELL\\Desktop\\Projects\\Converges_Hackathon\\backend\\venv', 'C:\\Users\\DELL\\Desktop\\Projects\\Converges_Hackathon\\backend\\venv\\lib\\site-packages']
+
+TORCH: 2.2.1+cpu @ C:\Users\DELL\Desktop\Projects\Converges_Hackathon\backend\venv\lib\site-packages\torch\__init__.py
+TRANSFORMERS: 4.37.2 @ C:\Users\DELL\Desktop\Projects\Converges_Hackathon\backend\venv\lib\site-packages\transformers\__init__.py
+PILLOW: 10.2.0 @ C:\Users\DELL\Desktop\Projects\Converges_Hackathon\backend\venv\lib\site-packages\PIL\__init__.py
+
+Site Packages: ['C:\\Users\\DELL\\Desktop\\Projects\\Converges_Hackathon\\backend\\venv', 'C:\\Users\\DELL\\Desktop\\Projects\\Converges_Hackathon\\backend\\venv\\lib\\site-packages']
+User Site: C:\Users\DELL\AppData\Roaming\Python\Python310\site-packages

@@ -1,9 +1,9 @@
 'use client';
 
 import { CommunityPost, CATEGORY_THEMES, VerificationStatus } from '@/lib/types';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { communityApi } from '@/lib/api';
+import { communityApi, authApi } from '@/lib/api';
 import { useAuth } from '@/lib/AuthContext';
 
 interface Props {
@@ -31,6 +31,39 @@ export default function CommunityPostCard({ post, onUpdate }: Props) {
     const [likes, setLikes] = useState(post.likes);
     const [liked, setLiked] = useState((post.likedBy ?? []).includes(currentUserId));
     const [commenting, setCommenting] = useState(false);
+    const [isFollowing, setIsFollowing] = useState(false);
+    const [followLoading, setFollowLoading] = useState(false);
+
+    const isOwnPost = !!user && user?.userName === post.userName;
+
+    useEffect(() => {
+        if (!user || isOwnPost || !post.userName || !post.userId) return;
+        authApi.getUserProfile(post.userName)
+            .then(profile => {
+                const followers: string[] = (profile as any).followers || [];
+                setIsFollowing(followers.includes(user.id || user.uid || ''));
+            })
+            .catch(() => { });
+    }, [user, post.userName, isOwnPost]);
+
+    const handleFollow = async (e: React.MouseEvent) => {
+        e.stopPropagation(); // don't trigger the parent card's onClick
+        if (!user || !post.userName || followLoading) return;
+        setFollowLoading(true);
+        try {
+            if (isFollowing) {
+                await authApi.unfollowUser(post.userName);
+                setIsFollowing(false);
+            } else {
+                await authApi.followUser(post.userName);
+                setIsFollowing(true);
+            }
+        } catch {
+            setIsFollowing(prev => !prev);
+        } finally {
+            setFollowLoading(false);
+        }
+    };
 
     const timeAgo = (dateStr: string) => {
         const diff = Date.now() - new Date(dateStr).getTime();
@@ -116,6 +149,20 @@ export default function CommunityPostCard({ post, onUpdate }: Props) {
                     {badge.icon} {badge.label}
                 </span>
             </div>
+
+            {/* Follow button — shown for other users' non-anonymous posts */}
+            {!isOwnPost && user && post.userId && (
+                <button
+                    onClick={handleFollow}
+                    disabled={followLoading}
+                    className={`self-start text-xs font-bold px-3 py-1 rounded-lg transition-all ${isFollowing
+                            ? 'bg-white/10 text-slate-400 border border-white/20 hover:bg-red-500/20 hover:text-red-400'
+                            : 'bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500 hover:text-white'
+                        } disabled:opacity-50`}
+                >
+                    {followLoading ? '...' : isFollowing ? 'Following ✓' : '+ Follow'}
+                </button>
+            )}
 
             {/* Content */}
             <div className="relative">

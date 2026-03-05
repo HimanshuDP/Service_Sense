@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Query, HTTPException, UploadFile, File
+from fastapi import APIRouter, Query, HTTPException, UploadFile, File, Depends
 from database import (
-    _is_demo, demo_add, demo_list, demo_get, demo_update,
-    rtdb_push, rtdb_get_all, rtdb_get_one, rtdb_update, rtdb_as_list
+    _is_demo, demo_add, demo_list, demo_get, demo_update, demo_delete,
+    rtdb_push, rtdb_get_all, rtdb_get_one, rtdb_update, rtdb_as_list, rtdb_delete
 )
 from models.schemas import CommunityPostCreate, CommentRequest, LikeRequest, ImpactUpdateRequest
 from services.openai_service import verify_post
+from routers.auth import get_optional_current_user, get_current_user
 from datetime import datetime
 
 router = APIRouter(prefix="/api/community", tags=["community"])
@@ -20,6 +21,12 @@ def _credibility_score(likes: int, ai_status: str) -> float:
 async def create_post(post: CommunityPostCreate):
     verification = await verify_post(post.title, post.description, post.category)
     ai_status = verification["status"]
+    
+    # Do not save posts that are completely irrelevant/spam
+    if ai_status == "invalid":
+        reason = verification.get("reason", "The content appears to be spam, gibberish, or completely unrelated to environmental issues.")
+        raise HTTPException(status_code=400, detail=f"Post rejected by AI: {reason}")
+        
     now = datetime.utcnow().isoformat()
 
     doc_data = {
@@ -55,6 +62,7 @@ async def get_posts(
     locality: str = Query(default=""),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=12, le=50),
+    current_user: dict = Depends(get_optional_current_user)
 ):
     offset = (page - 1) * limit
     filters = {}
@@ -71,11 +79,33 @@ async def get_posts(
                                     offset=offset, limit=limit)
 
     for idx, p in enumerate(posts):
-        if p.get("isAnonymous"):
+        is_owner = current_user and current_user.get("id") == p.get("userId")
+        if p.get("isAnonymous") and not is_owner:
             posts[idx]["userId"] = None
             posts[idx]["userName"] = "Anonymous"
 
     return {"posts": posts, "total": total, "page": page, "limit": limit}
+
+
+@router.delete("/posts/{post_id}")
+async def delete_post(post_id: str, current_user: dict = Depends(get_current_user)):
+    if _is_demo():
+        doc = demo_get("community_posts", post_id)
+    else:
+        doc = rtdb_get_one("community_posts", post_id)
+
+    if not doc:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    if doc.get("userId") != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this post")
+
+    if _is_demo():
+        demo_delete("community_posts", post_id)
+    else:
+        rtdb_delete("community_posts", post_id)
+
+    return {"status": "deleted", "message": "Post successfully deleted"}
 
 
 @router.put("/posts/{post_id}/like")
@@ -194,43 +224,39 @@ async def classify_image(file: UploadFile = File(...)):
     if len(image_bytes) == 0:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
-    # Lazy import — model loads only when first request arrives
+    import traceback
     try:
-        from ml.image_classifier.predict import predict_image
-    except FileNotFoundError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Image classification model is not yet trained. "
-                "Run: python ml/image_classifier/train_image_model.py"
-            ),
-        ) from exc
-    except ImportError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Image classification dependencies not installed: {exc}",
-        ) from exc
+        # Lazy import — model loads only when first request arrives
+        try:
+            from ml.image_classifier.predict import predict_image
+        except ImportError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Image classification dependencies not installed: {exc}",
+            ) from exc
 
-    try:
         result = predict_image(image_bytes)
-    except ValueError as exc:
+        
+        return {
+            "category":   result["category"],
+            "confidence": result["confidence"],
+            "accepted":   result["accepted"],
+            "all_scores": result["all_scores"],
+            "mode":       result.get("mode", "unknown"),
+            "message": (
+                f"✅ Image accepted as '{result['category']}' "
+                f"(confidence: {result['confidence']*100:.1f}%)"
+                if result["accepted"] else
+                f"❌ Image rejected — "
+                f"category: '{result['category']}', "
+                f"confidence: {result['confidence']*100:.1f}%"
+            ),
+        }
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(f"\n[BACKEND CRASH] classify-image:\n{tb}")
+        # Return the traceback to the user so we can see it in the console log they share
         raise HTTPException(
-            status_code=422,
-            detail=f"Could not process the image: {exc}",
-        ) from exc
-
-    return {
-        "category":   result["category"],
-        "confidence": result["confidence"],
-        "accepted":   result["accepted"],
-        "all_scores": result["all_scores"],
-        "mode":       result.get("mode", "unknown"),
-        "message": (
-            f"✅ Image accepted as '{result['category']}' "
-            f"(confidence: {result['confidence']*100:.1f}%)"
-            if result["accepted"] else
-            f"❌ Image rejected — "
-            f"category: '{result['category']}', "
-            f"confidence: {result['confidence']*100:.1f}%"
-        ),
-    }
+            status_code=500,
+            detail=f"Backend Error: {str(e)}\n\n{tb}"
+        )

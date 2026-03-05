@@ -34,7 +34,7 @@ MODELS_DIR  = os.path.join(SCRIPT_DIR, "models")
 
 CATEGORIES           = ["air", "water", "land", "waste"]
 IMG_SIZE             = (224, 224)
-CONFIDENCE_THRESHOLD = 0.70
+CONFIDENCE_THRESHOLD = 0.50
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Internal state

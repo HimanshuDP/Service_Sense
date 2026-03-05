@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Navbar from '@/components/Navbar';
 import CommunityPostCard from '@/components/CommunityPostCard';
 import PostForm from '@/components/PostForm';
+import InstagramPostModal from '@/components/InstagramPostModal';
 import { communityApi } from '@/lib/api';
 import { CommunityPost, EnvCategory } from '@/lib/types';
 
@@ -24,6 +25,7 @@ export default function CommunityDashboard() {
     const [page, setPage] = useState(1);
     const [total, setTotal] = useState(0);
     const [showForm, setShowForm] = useState(false);
+    const [selectedPost, setSelectedPost] = useState<CommunityPost | null>(null);
 
     const localityParam = locality === 'All India' ? '' : locality;
 
@@ -121,7 +123,11 @@ export default function CommunityDashboard() {
                 ) : posts.length > 0 ? (
                     <>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {posts.map((p) => <CommunityPostCard key={p.id} post={p} onUpdate={loadPosts} />)}
+                            {posts.map((p) => (
+                                <div key={p.id} onClick={() => setSelectedPost(p)} className="cursor-pointer">
+                                    <CommunityPostCard post={p} onUpdate={loadPosts} />
+                                </div>
+                            ))}
                         </div>
                         {total > 12 && (
                             <div className="flex justify-center gap-3 mt-4">
@@ -140,6 +146,21 @@ export default function CommunityDashboard() {
                     </div>
                 )}
             </main>
+
+            {selectedPost && (
+                <InstagramPostModal
+                    post={selectedPost}
+                    onClose={() => setSelectedPost(null)}
+                    onUpdate={() => {
+                        loadPosts();
+                        // Refresh the selected post data after an update
+                        communityApi.getAll({ category: catFilter === 'all' ? '' : catFilter, locality: localityParam, page }).then(res => {
+                            const updated = res.posts.find((p: CommunityPost) => p.id === selectedPost.id);
+                            if (updated) setSelectedPost(updated);
+                        });
+                    }}
+                />
+            )}
         </div>
     );
 }

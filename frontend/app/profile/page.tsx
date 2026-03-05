@@ -171,6 +171,28 @@ export default function ProfilePage() {
                                                 <svg aria-label="Carousel" className="x1lliihq x1n2onr6 x5n08af" fill="currentColor" height="22" role="img" viewBox="0 0 48 48" width="22"><path d="M34.8 29.7V11c0-2.9-2.3-5.2-5.2-5.2H11c-2.9 0-5.2 2.3-5.2 5.2v18.7c0 2.9 2.3 5.2 5.2 5.2h18.7c2.8-.1 5.1-2.4 5.1-5.2zM39.2 15v16.1c0 4.5-3.7 8.1-8.1 8.1H14.9c-1 0-2-.9-2-2s.9-2 2-2h16.1c2.3 0 4.1-1.8 4.1-4.1V15c0-1 .9-2 2-2s2 .9 2 2z"></path></svg>
                                             </div>
                                         )}
+
+                                        {/* Delete Button overlay (only visible on hover) */}
+                                        <button
+                                            title="Delete Post"
+                                            onClick={async (e) => {
+                                                e.stopPropagation();
+                                                if (window.confirm('Are you sure you want to permanently delete this post?')) {
+                                                    try {
+                                                        await communityApi.deletePost(post.id);
+                                                        setPosts(prev => prev.filter(p => p.id !== post.id));
+                                                    } catch (err) {
+                                                        alert('Failed to delete post');
+                                                    }
+                                                }
+                                            }}
+                                            className="absolute top-2 left-2 bg-red-600/90 hover:bg-red-500 text-white shadow-lg rounded-md p-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                                <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z" />
+                                                <path fillRule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z" />
+                                            </svg>
+                                        </button>
                                     </div>
                                 )
                             })}

@@ -56,6 +56,13 @@ CATEGORY_PROMPTS: dict[str, list[str]] = {
         "illegal waste dumping in an open area",
         "scattered plastic bottles and trash on road",
     ],
+    "general": [
+        "a photo of a person, animal, or everyday object",
+        "a normal city street or building without pollution",
+        "a clean landscape or generic background",
+        "a picture of a dog, cat, or pet",
+        "a screenshot of text or an application",
+    ],
 }
 
 # Best single representative prompt per category (used for scoring)
@@ -66,7 +73,7 @@ BEST_PROMPTS: dict[str, str] = {
     "waste": "garbage dump with plastic waste and litter",
 }
 
-CONFIDENCE_THRESHOLD = 0.70
+CONFIDENCE_THRESHOLD = 0.30
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Singleton state
@@ -144,31 +151,45 @@ def classify_with_clip(image_bytes: bytes) -> dict:
 
     pil_image = _preprocess_pil(image_bytes)
 
-    all_scores: dict[str, float] = {}
+    flat_prompts = []
+    prompt_to_cat = {}
+    for cat, prompts in CATEGORY_PROMPTS.items():
+        for p in prompts:
+            flat_prompts.append(p)
+            prompt_to_cat[p] = cat
 
     with torch.no_grad():
-        for cat, prompts in CATEGORY_PROMPTS.items():
-            inputs = _clip_processor(
-                text=prompts,
-                images=pil_image,
-                return_tensors="pt",
-                padding=True,
-            )
-            outputs     = _clip_model(**inputs)
-            # Similarity between image and each text prompt
-            logits      = outputs.logits_per_image          # shape: (1, num_prompts)
-            probs       = F.softmax(logits, dim=-1)         # normalise across prompts
-            best_score  = float(probs[0].max().item())      # highest prompt match
-            all_scores[cat] = round(best_score, 4)
+        inputs = _clip_processor(
+            text=flat_prompts,
+            images=pil_image,
+            return_tensors="pt",
+            padding=True,
+        )
+        outputs = _clip_model(**inputs)
+        # Similarity between image and each text prompt
+        logits = outputs.logits_per_image          # shape: (1, total_prompts)
+        probs = F.softmax(logits, dim=-1)[0]       # shape: (total_prompts,)
 
-    # Normalise scores across categories so they sum to 1
-    total = sum(all_scores.values())
-    if total > 0:
-        all_scores = {k: round(v / total, 4) for k, v in all_scores.items()}
+    # Aggregate probabilities by category
+    all_scores: dict[str, float] = {cat: 0.0 for cat in CATEGORY_PROMPTS.keys()}
+    for idx, p in enumerate(flat_prompts):
+        cat = prompt_to_cat[p]
+        all_scores[cat] += float(probs[idx].item())
 
-    best_cat   = max(all_scores, key=all_scores.get)
-    best_score = all_scores[best_cat]
-    accepted   = best_score >= CONFIDENCE_THRESHOLD
+    all_scores = {k: round(v, 4) for k, v in all_scores.items()}
+
+    # Calculate total probability that this is an environmental issue
+    env_total = sum(score for cat, score in all_scores.items() if cat != "general")
+    general_score = all_scores.get("general", 0.0)
+
+    # Find the best specific environmental category
+    env_scores = {k: v for k, v in all_scores.items() if k != "general"}
+    best_cat = max(env_scores, key=env_scores.get)
+    best_score = env_scores[best_cat]
+
+    # Acceptance Logic:
+    # Confident that it's more environmental than general
+    accepted = (env_total > max(0.4, general_score)) and (best_score >= CONFIDENCE_THRESHOLD)
 
     return {
         "category":   best_cat if accepted else None,

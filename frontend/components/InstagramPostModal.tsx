@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { CommunityPost, CATEGORY_THEMES } from '@/lib/types';
-import { communityApi } from '@/lib/api';
+import { communityApi, authApi } from '@/lib/api';
 import Link from 'next/link';
 import { useAuth } from '@/lib/AuthContext';
 
@@ -17,15 +17,30 @@ export default function InstagramPostModal({ post, onClose, onUpdate }: Props) {
     const { user } = useAuth();
 
     // Fallbacks
-    const currentUserId = user?.uid || 'guest-user';
+    const currentUserId = user?.uid || user?.id || 'guest-user';
     const currentUserName = user?.userName || user?.displayName || 'Guest User';
+    // Hide follow button only when the logged in user IS the post author
+    const isOwnPost = !!user && user?.userName === post.userName;
 
     // Local state for instant UI updates
     const [likes, setLikes] = useState(post.likes);
     const [liked, setLiked] = useState(post.likedBy?.includes(currentUserId) ?? false);
     const [commentText, setCommentText] = useState('');
-    const [comments, setComments] = useState(post.comments);
+    const [comments, setComments] = useState(post.comments || []);
     const [acting, setActing] = useState(false);
+    const [isFollowing, setIsFollowing] = useState(false);
+    const [followLoading, setFollowLoading] = useState(false);
+
+    // Check follow state on mount (only for other users' non-anonymous posts)
+    useEffect(() => {
+        if (!user || isOwnPost || !post.userName || !post.userId) return;
+        authApi.getUserProfile(post.userName)
+            .then(profile => {
+                const followers: string[] = (profile as any).followers || [];
+                setIsFollowing(followers.includes(user.id || user.uid || ''));
+            })
+            .catch(() => { });
+    }, [user, post.userName, isOwnPost]);
 
     // Media resolving (videos/images)
     const mediaUrls = post.mediaUrls || ((post as any).imageUrl ? [(post as any).imageUrl] : []);
@@ -49,6 +64,25 @@ export default function InstagramPostModal({ post, onClose, onUpdate }: Props) {
         } catch {
             setLikes((l) => liked ? l - 1 : l + 1);
             setLiked((prev) => !prev);
+        }
+    };
+
+    const handleFollow = async () => {
+        if (!user || !post.userName || followLoading) return;
+        setFollowLoading(true);
+        try {
+            if (isFollowing) {
+                await authApi.unfollowUser(post.userName);
+                setIsFollowing(false);
+            } else {
+                await authApi.followUser(post.userName);
+                setIsFollowing(true);
+            }
+        } catch {
+            // revert optimistic update on error
+            setIsFollowing(prev => !prev);
+        } finally {
+            setFollowLoading(false);
         }
     };
 
@@ -126,11 +160,24 @@ export default function InstagramPostModal({ post, onClose, onUpdate }: Props) {
                             >
                                 {post.userName[0]?.toUpperCase()}
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div>
                                 <span className="font-semibold text-white text-sm">{post.userName}</span>
-                                {post.userId && <span className="text-blue-500 font-semibold text-xs">· Follow</span>}
                             </div>
                         </Link>
+
+                        {/* Follow / Unfollow Button */}
+                        {!isOwnPost && user && post.userId && (
+                            <button
+                                onClick={handleFollow}
+                                disabled={followLoading}
+                                className={`ml-2 px-3 py-1 rounded-lg text-xs font-bold tracking-wide transition-all ${isFollowing
+                                    ? 'bg-white/10 text-slate-300 border border-white/20 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/30'
+                                    : 'bg-blue-500 text-white hover:bg-blue-600'
+                                    } disabled:opacity-50`}
+                            >
+                                {followLoading ? '...' : isFollowing ? 'Following' : 'Follow'}
+                            </button>
+                        )}
 
                         <button onClick={onClose} className="hidden md:block text-slate-400 hover:text-white p-1">
                             ✕
